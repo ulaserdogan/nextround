@@ -461,7 +461,12 @@ function mountAgent(a){
     const el=document.createElement('elevenlabs-convai');
     el.setAttribute('agent-id',id);
     el.setAttribute('dynamic-variables',JSON.stringify(callVars(a)));
+    el.setAttribute('action-text',`Call ${a.account_id} with Sofia`);
+    el.setAttribute('start-call-text','Start AI call');
+    el.setAttribute('end-call-text','End call');
     m.appendChild(el);
+    const ready=()=>{ const p=m.querySelector('p'); if(p) p.outerHTML='<p style="margin:0;color:var(--ok);font-weight:600">Voice agent ready. Use the call button at the bottom right of the screen.</p>'; };
+    if(window.customElements) customElements.whenDefined('elevenlabs-convai').then(ready).catch(()=>{});
     if(!widgetLoaded){ const sc=document.createElement('script'); sc.src='https://unpkg.com/@elevenlabs/convai-widget-embed@0.19.0'; sc.async=true;
       sc.onerror=()=>{ m.innerHTML='<p style="margin:0;color:var(--crit)">The voice widget could not load here. Open the hosted version of the page to make a live call.</p>'; };
       document.body.appendChild(sc); widgetLoaded=true; }
