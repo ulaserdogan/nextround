@@ -136,6 +136,15 @@ th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
 th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 td.r,th.r{text-align:right}
 .tblwrap{overflow-x:auto}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:8px 0;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px;opacity:.75}
+.statgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;align-self:start}
+.statgrid div{background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:2px}
+.statgrid b{font:700 26px/1.1 var(--display)}
+.statgrid .sub{font-size:12px;color:var(--muted)}
+table.vars td{padding:5px 8px;vertical-align:top}
+table.vars td:first-child{color:var(--accent);white-space:nowrap;font-size:12px}
+.callcard{border-color:var(--accent)}
 .foot{color:var(--muted);font-size:12px;margin-top:24px;border-top:1px solid var(--line);padding-top:12px}
 .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
 .flow div{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--sunk)}
@@ -188,7 +197,7 @@ td.r,th.r{text-align:right}
       <div class="card"><h3>AI voice calls · <span id="nCall"></span></h3><div class="label">Escalate to rep if unhappy</div><ul class="plist" id="callList"></ul></div>
       <div class="card"><h3>Automated offers · <span id="nAuto"></span></h3><div class="label">WhatsApp / email, PT + EN</div><ul class="plist" id="autoList"></ul></div>
     </div>
-    <div class="card" style="margin-top:16px"><h3>Territory map</h3><div class="label">Flagged accounts by location · dot size = 12-month spend</div><div id="map" style="overflow-x:auto"></div></div>
+    <div class="card" style="margin-top:16px"><h3>Territory map</h3><div class="label">Flagged accounts by location · dot size = 12-month spend</div><div class="legend"><span><i style="background:var(--crit)"></i>Rep visit</span><span><i style="background:var(--warn)"></i>AI call</span><span><i style="background:var(--accent)"></i>Auto offer</span></div><div id="map" style="overflow-x:auto"></div></div>
   </section>
 
   <!-- METHOD -->
@@ -224,8 +233,22 @@ td.r,th.r{text-align:right}
         <p style="margin:0 0 8px">Priority = risk score × spend score (1–5, spend quintiles). A 95%-risk account worth R$ 300 matters less than a 75%-risk account worth R$ 20,000.</p>
         <p style="margin:0 0 8px"><b>Revenue at risk</b> = 12-month spend × churn probability for the account's gap-ratio band, taken from the backtest.</p>
         <h3 style="margin-top:16px">Coverage rule (per territory, per week)</h3>
-        <p style="margin:0">Top 10 by priority → rep visit · next 25 → AI voice call · remaining High/Medium → automated offer · Low → monitor only.</p>
+        <p style="margin:0">Top 10 by priority → rep visit · next 25 → AI voice call (ElevenLabs agent, hands unhappy accounts to the rep) · remaining High/Medium → automated offer · Low → monitor only.</p>
       </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Does the score work? Backtest of the full risk score</h3>
+      <p class="prose" style="margin:0 0 12px;color:var(--muted)">We rebuilt the exact score as of 28 Feb 2018, using only data up to that day, and then checked who stopped ordering over the next six months. 1,258 accounts, of which 88 churned (7.0%).</p>
+      <div class="two">
+        <div id="tierChart"></div>
+        <div class="statgrid">
+          <div><span class="label">High tier churned</span><b>52%</b><span class="sub">7.4× the 7% average</span></div>
+          <div><span class="label">Top 10% flagged</span><b>47%</b><span class="sub">of all accounts that later churned</span></div>
+          <div><span class="label">Ranking accuracy (AUC)</span><b>0.77</b><span class="sub">0.5 = coin flip · 1.0 = perfect</span></div>
+          <div><span class="label">Top 20% by priority</span><b>60%</b><span class="sub">of the spend that was lost</span></div>
+        </div>
+      </div>
+      <p style="margin:12px 0 0;color:var(--muted)">Second test from 31 Dec 2017: the High tier churned at 50% (8.7×), AUC 0.70. Order rhythm and frequency drive the result. Removing the review and delivery points gives the same accuracy, so those points mainly guide how the rep opens the conversation. Script: Backtest/backtest.py.</p>
     </div>
     <div class="card" style="margin-top:16px">
       <h3>Product lines</h3>
@@ -244,7 +267,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const R$ = x => 'R$ ' + Math.round(x).toLocaleString('pt-BR');
 const MONTHS = ['Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug'];
-const state = { terr:'ALL', tier:'Flagged', play:'All', q:'', sel:null, view:'list', atab:'talk', lang:'en', done:{} };
+const state = { override:{}, terr:'ALL', tier:'Flagged', play:'All', q:'', sel:null, view:'list', atab:'talk', lang:'en', done:{} };
 try { Object.assign(state.done, JSON.parse(localStorage.getItem('nr_done')||'{}')); } catch(e){}
 const saveDone = () => { try { localStorage.setItem('nr_done', JSON.stringify(state.done)); } catch(e){} };
 
@@ -258,6 +281,7 @@ function channels(list){
   const flagged = list.filter(a=>a.tier!=='Low').sort((a,b)=>a.rank-b.rank);
   const ch = {};
   flagged.forEach((a,i)=> ch[a.account_id] = i<10 ? 'Visit' : i<35 ? 'AI call' : 'Auto offer');
+  Object.keys(state.override).forEach(id=>{ if(ch[id]) ch[id]=state.override[id]; });
   return ch;
 }
 let CH = {};
@@ -326,7 +350,9 @@ function briefing(a){
   s+=`About ${Math.round(a.rev_at_risk/100)*100} reais of yearly revenue is at risk.`;
   return s;
 }
+let lastSel=null;
 function renderDossier(){
+  if(lastSel!==state.sel){ try{ window.speechSynthesis && speechSynthesis.cancel(); }catch(e){} state.call=false; lastSel=state.sel; }
   const a=D.find(x=>x.account_id===state.sel);
   if(!a){ $('#dossier').innerHTML='<div class="card">Select an account.</div>'; return; }
   const ch=CH[a.account_id];
@@ -351,6 +377,7 @@ function renderDossier(){
       <div class="btns">
         <button class="btn primary" data-act="done">${state.done[a.account_id]?'Marked done ✓':'Mark as actioned'}</button>
         <button class="btn" data-act="copy">Copy ${state.atab==='msg'?'message':state.atab==='script'?'script':state.atab==='offer'?'offer':'talking points'}</button>
+        <button class="btn" data-act="call">${state.call?'Close AI call':'Start AI call'}</button>
         <button class="btn" data-act="escalate">${ch==='Visit'?'Add to route':'Escalate to rep visit'}</button>
       </div></div>`;
   } else {
@@ -384,7 +411,61 @@ function renderDossier(){
        <div style="margin-top:8px"><div class="label">Usual product lines${a.line_dropped?' · dropped line struck through':''}</div><div class="lines">${lines}</div></div>
      </div>
    </div>
-   ${action}`;
+   ${action}
+   ${a.action && state.call ? callPanel(a) : ''}`;
+  if(a.action && state.call) mountAgent(a);
+}
+const AGENT_KEY='nr_agent';
+function agentId(){ try{ return localStorage.getItem(AGENT_KEY)||''; }catch(e){ return state.agentMem||''; } }
+function setAgentId(v){ state.agentMem=v; try{ localStorage.setItem(AGENT_KEY,v); }catch(e){} }
+function callVars(a){
+  const usual=(a.lines_top||[]).filter(l=>l!==a.line_dropped).slice(0,2).join(' and ');
+  const issue=a.complaint_en || ((a.complaint_themes||[]).length ? (a.complaint_themes.join(' and ').toLowerCase()) : (a.last_late_date && a.last_late_date>='2018-03-01' ? `late delivery on ${a.last_late_date}` : 'none'));
+  const credit=(a.offer.match(/R\$ ?\d+/)||['R$ 25'])[0];
+  return { account_id:a.account_id, city:a.city, usual_gap_days:String(Math.round(a.avg_gap)), days_silent:String(a.days_since),
+    usual_lines:usual||'their usual range', dropped_line:a.line_dropped||'none', last_issue:issue, offer:a.offer, credit:credit, rep_name:'Marina Costa' };
+}
+function firstMessage(v){ return `Hi, this is Sofia, the AI assistant from your HEINEKEN account team, calling about your account in ${v.city}. Do you have two minutes?`; }
+function callPanel(a){
+  const v=callVars(a), id=agentId();
+  return `<div class="card callcard" id="callPanel">
+    <div class="dhead"><div><div class="label">AI voice agent · ElevenLabs</div><h3 style="margin:4px 0 0">Outbound check-in call for ${a.account_id}</h3></div>
+    <span class="pill ch">${id?'Live agent connected':'Demo mode'}</span></div>
+    <div class="two" style="margin-top:12px">
+      <div>
+        <div class="label">What the agent receives (dynamic variables)</div>
+        <div class="tblwrap"><table class="vars"><tbody>${Object.entries(v).map(([k,x])=>`<tr><td class="num">{{${k}}}</td><td>${esc(x)}</td></tr>`).join('')}</tbody></table></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+        <div><div class="label">Opening line</div><div class="msg" style="margin-top:4px">${esc(firstMessage(v))}</div></div>
+        <div class="btns" style="margin:0"><button class="btn" data-act="preview">Preview opening line</button></div>
+        <div id="agentMount">${id?'<p style="margin:0;color:var(--muted)">Loading the voice agent. Click the call button that appears to start talking.</p>':''}</div>
+        <div><label class="label" for="agentId">ElevenLabs agent ID</label>
+          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap"><input id="agentId" value="${esc(id)}" placeholder="agent_..." style="flex:1;min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px">
+          <button class="btn" data-act="saveAgent">${id?'Update':'Connect'}</button></div>
+          <p style="margin:6px 0 0;font-size:12px;color:var(--muted)">Live calls work on the hosted version of this page. The preview inside claude.ai blocks the connection.</p></div>
+      </div>
+    </div>
+    <div class="label" style="margin-top:14px">Log the call outcome</div>
+    <div class="btns" style="margin-top:6px">
+      <button class="btn primary" data-act="out-order">Order booked</button>
+      <button class="btn" data-act="out-rep">Unhappy: hand over to rep</button>
+      <button class="btn" data-act="out-no">Not interested</button>
+    </div>
+  </div>`;
+}
+let widgetLoaded=false;
+function mountAgent(a){
+  const id=agentId(); const m=$('#agentMount'); if(!id||!m) return;
+  try{
+    const el=document.createElement('elevenlabs-convai');
+    el.setAttribute('agent-id',id);
+    el.setAttribute('dynamic-variables',JSON.stringify(callVars(a)));
+    m.appendChild(el);
+    if(!widgetLoaded){ const sc=document.createElement('script'); sc.src='https://unpkg.com/@elevenlabs/convai-widget-embed@0.19.0'; sc.async=true;
+      sc.onerror=()=>{ m.innerHTML='<p style="margin:0;color:var(--crit)">The voice widget could not load here. Open the hosted version of the page to make a live call.</p>'; };
+      document.body.appendChild(sc); widgetLoaded=true; }
+  }catch(e){ m.innerHTML='<p style="margin:0;color:var(--crit)">The voice widget could not start in this browser.</p>'; }
 }
 function renderPlan(){
   const t=territory().filter(a=>a.tier!=='Low').sort((a,b)=>a.rank-b.rank);
@@ -406,7 +487,6 @@ function renderPlan(){
   const col={Visit:'var(--crit)','AI call':'var(--warn)','Auto offer':'var(--accent)'};
   $('#map').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:520px;background:var(--sunk);border-radius:8px" role="img" aria-label="Map of flagged accounts">
     ${pts.sort((a,b)=>(CH[b.account_id]==='Visit')-(CH[a.account_id]==='Visit')).reverse().map(a=>`<circle cx="${X(a.lng).toFixed(1)}" cy="${Y(a.lat).toFixed(1)}" r="${(3+9*Math.sqrt(a.spend_12m/maxS)).toFixed(1)}" fill="${col[CH[a.account_id]]}" fill-opacity=".55" stroke="${col[CH[a.account_id]]}" data-goto="${a.account_id}" style="cursor:pointer"><title>${a.account_id} · ${a.city} · ${CH[a.account_id]}</title></circle>`).join('')}
-    <g transform="translate(12,${H-14})"><circle r="5" fill="var(--crit)"/><text x="10" y="4">Rep visit</text><circle cx="90" r="5" fill="var(--warn)"/><text x="100" y="4">AI call</text><circle cx="170" r="5" fill="var(--accent)"/><text x="180" y="4">Auto offer</text></g>
   </svg>`;
 }
 function renderBacktest(){
@@ -419,6 +499,16 @@ function renderBacktest(){
      <text x="${l+i*bw+bw/2}" y="${y(v)-4}" text-anchor="middle" style="fill:var(--ink);font-weight:600">${v}%</text>
      <text x="${l+i*bw+bw/2}" y="${H-b+14}" text-anchor="middle">${n}</text><text x="${l+i*bw+bw/2}" y="${H-b+26}" text-anchor="middle">n=${c}</text>`).join('')}
   </svg><div class="label">Share that churned within 6 months, by gap ratio at snapshot</div>`;
+  const T=[['High',51.6,62,'var(--crit)'],['Medium',12.9,116,'var(--warn)'],['Low',3.8,1080,'var(--ok)']];
+  const W2=460,rowH=40,l2=70,max2=60,x2=v=>l2+(v/max2)*(W2-l2-60);
+  $('#tierChart').innerHTML=`<svg viewBox="0 0 ${W2} ${T.length*rowH+30}" width="100%" style="max-width:520px" role="img" aria-label="Churn rate by risk tier in the backtest">
+   <line x1="${x2(7)}" x2="${x2(7)}" y1="0" y2="${T.length*rowH}" stroke="var(--muted)" stroke-dasharray="3 3"/>
+   <text x="${x2(7)+4}" y="${T.length*rowH+12}">7% average</text>
+   ${T.map(([n,v,c,col],i)=>`<text x="0" y="${i*rowH+22}" style="fill:var(--ink);font-family:var(--body);font-size:12px;font-weight:600">${n}</text>
+     <text x="0" y="${i*rowH+34}">n=${c}</text>
+     <rect x="${l2}" y="${i*rowH+8}" width="${x2(v)-l2}" height="22" rx="3" fill="${col}"/>
+     <text x="${Math.max(x2(v),x2(7))+6}" y="${i*rowH+23}" style="fill:var(--ink);font-weight:600;font-size:12px">${v}%</text>`).join('')}
+  </svg><div class="label">Share of each tier that actually churned within 6 months</div>`;
 }
 function toast(m){ const t=$('#toast'); t.textContent=m; t.hidden=false; clearTimeout(toast.h); toast.h=setTimeout(()=>t.hidden=true,2200); }
 function copyText(txt){
@@ -447,7 +537,13 @@ document.addEventListener('click', e=>{
     const txt = state.atab==='talk'? a.talking_points.join('\n') : state.atab==='offer'? a.offer_title+': '+a.offer : state.atab==='script'? a.call_script.join('\n') : (state.lang==='en'?a.message_en:a.message_pt);
     copyText(txt);
   }
-  if(t.dataset.act==='escalate'){ CH[a.account_id]='Visit'; renderKPIs(); renderList(); renderDossier(); toast(`${a.account_id} added to this week's route`); }
+  if(t.dataset.act==='escalate'){ state.override[a.account_id]='Visit'; CH[a.account_id]='Visit'; renderKPIs(); renderList(); renderDossier(); toast(`${a.account_id} added to this week's route`); }
+  if(t.dataset.act==='call'){ state.call=!state.call; renderDossier(); if(state.call) setTimeout(()=>$('#callPanel')?.scrollIntoView({behavior:'smooth',block:'nearest'}),50); return; }
+  if(t.dataset.act==='saveAgent'){ const v=($('#agentId').value||'').trim(); setAgentId(v); renderDossier(); toast(v?'Agent connected':'Agent removed, demo mode'); return; }
+  if(t.dataset.act==='preview'){ try{ const ss=window.speechSynthesis; if(!ss) throw 0; ss.cancel(); const u=new SpeechSynthesisUtterance(firstMessage(callVars(a))); u.lang='en-US'; ss.speak(u); toast('Playing opening line'); }catch(e){ toast('Audio is not available in this browser'); } return; }
+  if(t.dataset.act==='out-order'){ state.done[a.account_id]=true; saveDone(); state.call=false; renderKPIs(); renderList(); renderDossier(); toast(`Order booked for ${a.account_id}`); return; }
+  if(t.dataset.act==='out-rep'){ state.override[a.account_id]='Visit'; CH[a.account_id]='Visit'; state.call=false; renderKPIs(); renderList(); renderDossier(); toast(`${a.account_id} handed over to the rep and added to this week's route`); return; }
+  if(t.dataset.act==='out-no'){ state.done[a.account_id]=true; saveDone(); state.call=false; renderKPIs(); renderList(); renderDossier(); toast('Logged as not interested. The account is re-scored next week'); return; }
   if(t.dataset.act==='speak'){
     try{
       const ss=window.speechSynthesis; if(!ss) throw 0;
@@ -462,6 +558,7 @@ $('#terr').addEventListener('change', e=>{ state.terr=e.target.value; const f=fi
 $('#q').addEventListener('input', e=>{ state.q=e.target.value; renderList(); });
 state.sel = filtered()[0]?.account_id;
 renderAll();
-const h=(location.hash||'').slice(1); if(['plan','method'].includes(h)) setView(h);
+const fromHash=()=>{ const h=(location.hash||'').slice(1); if(['list','plan','method'].includes(h) && h!==state.view) setView(h); };
+fromHash(); window.addEventListener('hashchange', fromHash);
 </script>
 </body></html>
